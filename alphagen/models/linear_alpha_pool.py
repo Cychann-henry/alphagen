@@ -27,6 +27,7 @@ class LinearAlphaPool(AlphaPoolBase, metaclass=ABCMeta):
         self._weights: np.ndarray = np.zeros(capacity + 1)
         self._mutual_ics: np.ndarray = np.identity(capacity + 1)
         self._extra_info = [None for _ in range(capacity + 1)]
+        # 如果未提供 IC 下限，则设为 -1
         self._ic_lower_bound = -1. if ic_lower_bound is None else ic_lower_bound
         self.best_obj = -1.
         self.update_history: List[PoolUpdate] = []
@@ -60,20 +61,26 @@ class LinearAlphaPool(AlphaPoolBase, metaclass=ABCMeta):
 
     def try_new_expr(self, expr: Expression) -> float:
         ic_ret, ic_mut = self._calc_ics(expr, ic_mut_threshold=0.99)
+        # 检查 IC 是否有效，如果无效（None 或 NaN），则返回 0
         if ic_ret is None or ic_mut is None or np.isnan(ic_ret) or np.isnan(ic_mut).any():
+            #判断nan返回0
             return 0.
+        # 检查表达式是否在失败缓存中，如果是则直接返回当前最佳目标值
         if str(expr) in self._failure_cache:
             return self.best_obj
 
         self.eval_cnt += 1
         old_pool: List[Expression] = self.exprs[:self.size]     # type: ignore
         self._add_factor(expr, ic_ret, ic_mut)
+        # 如果池子大小大于 1，则进行权重优化
         if self.size > 1:
             new_weights = self.optimize()
             worst_idx = None
+            # 如果池子大小超过容量，需要移除一个因子
             if self.size > self.capacity:   # Need to remove one
                 worst_idx = int(np.argmin(np.abs(new_weights)))
                 # The one added this time is the worst, revert the changes
+                # 如果此次添加的因子是最差的，则撤销更改
                 if worst_idx == self.capacity:
                     self._pop(worst_idx)
                     self._failure_cache.add(str(expr))
@@ -87,6 +94,7 @@ class LinearAlphaPool(AlphaPoolBase, metaclass=ABCMeta):
                 old_pool_ic=self.best_ic_ret,
                 new_pool_ic=ic_ret
             ))
+            # 如果有最差的因子需要移除
             if worst_idx is not None:
                 self._pop(worst_idx)
         else:
@@ -109,6 +117,7 @@ class LinearAlphaPool(AlphaPoolBase, metaclass=ABCMeta):
         old_pool: List[Expression] = self.exprs[:self.size] # type: ignore
         added = []
         for expr in exprs:
+            # 如果池子已满，则停止添加
             if self.size >= self.capacity:
                 break
             try:
@@ -119,11 +128,14 @@ class LinearAlphaPool(AlphaPoolBase, metaclass=ABCMeta):
             self._add_factor(expr, ic_ret, ic_mut)
             added.append(expr)
             assert self.size <= self.capacity
+        # 如果提供了权重，则设置权重
         if weights is not None:
+            # 检查权重长度是否有效
             if len(weights) != self.size:
                 raise ValueError(f"Invalid weights length: got {len(weights)}, expected {self.size}")
             self.weights = np.array(weights)
         else:
+            # 否则优化权重
             self.weights = self.optimize()
         new_ic, new_obj = self.calculate_ic_and_objective()
         self._maybe_update_best(new_ic, new_obj)
@@ -138,6 +150,7 @@ class LinearAlphaPool(AlphaPoolBase, metaclass=ABCMeta):
     def calculate_ic_and_objective(self) -> Tuple[float, float]:
         ic = self.evaluate_ensemble()
         obj = self._calc_main_objective()
+        # 如果主要目标值为空，则使用 IC 值
         if obj is None:
             obj = ic
         return ic, obj
@@ -146,6 +159,7 @@ class LinearAlphaPool(AlphaPoolBase, metaclass=ABCMeta):
         "Get the main optimization objective, return None for the default (ensemble IC)."
 
     def _maybe_update_best(self, ic: float, obj: float) -> bool:
+        # 如果新目标值不优于当前最佳值，则返回 False
         if obj <= self.best_obj:
             return False
         self.best_obj = obj
@@ -160,12 +174,14 @@ class LinearAlphaPool(AlphaPoolBase, metaclass=ABCMeta):
         return calculator.calc_pool_all_ret(self.exprs[:self.size], self.weights)      # type: ignore
 
     def evaluate_ensemble(self) -> float:
+        # 如果池子为空，返回 0
         if self.size == 0:
             return 0.
         return self.calculator.calc_pool_IC_ret(self.exprs[:self.size], self.weights)  # type: ignore
 
     @property
     def _under_thres_alpha(self) -> bool:
+        # 如果没有 IC 下限或者池子大小大于 1，返回 False
         if self._ic_lower_bound is None or self.size > 1:
             return False
         return self.size == 0 or abs(self.single_ics[0]) < self._ic_lower_bound
@@ -176,12 +192,14 @@ class LinearAlphaPool(AlphaPoolBase, metaclass=ABCMeta):
         ic_mut_threshold: Optional[float] = None
     ) -> Tuple[float, Optional[List[float]]]:
         single_ic = self.calculator.calc_single_IC_ret(expr)
+        # 如果未处于低阈值模式且单因子 IC 小于下限，则返回 None
         if not self._under_thres_alpha and single_ic < self._ic_lower_bound:
             return single_ic, None
 
         mutual_ics = []
         for i in range(self.size):
             mutual_ic = self.calculator.calc_mutual_IC(expr, self.exprs[i])     # type: ignore
+            # 如果设置了互相关阈值且互相关超过阈值，则返回 None
             if ic_mut_threshold is not None and mutual_ic > ic_mut_threshold:
                 return single_ic, None
             mutual_ics.append(mutual_ic)
@@ -197,6 +215,7 @@ class LinearAlphaPool(AlphaPoolBase, metaclass=ABCMeta):
         ic_ret: float,
         ic_mut: List[float]
     ):
+        # 如果处于低阈值模式且池子大小为 1，弹出该因子
         if self._under_thres_alpha and self.size == 1:
             self._pop()
         n = self.size
@@ -210,6 +229,7 @@ class LinearAlphaPool(AlphaPoolBase, metaclass=ABCMeta):
         self.size += 1
 
     def _pop(self, index_hint: Optional[int] = None) -> None:
+        # 如果当前大小未超过容量，则不需要弹出
         if self.size <= self.capacity:
             return
         index = int(np.argmin(np.abs(self.weights))) if index_hint is None else index_hint
@@ -217,6 +237,7 @@ class LinearAlphaPool(AlphaPoolBase, metaclass=ABCMeta):
         self.size = self.capacity
 
     def most_significant_indices(self, k: int) -> List[int]:
+        # 如果池子为空，返回空列表
         if self.size == 0:
             return []
         ranks = (-np.abs(self.weights)).argsort().argsort()
@@ -256,6 +277,7 @@ class LinearAlphaPool(AlphaPoolBase, metaclass=ABCMeta):
         ))
 
     def _swap_idx(self, i: int, j: int) -> None:
+        # 如果索引相同，则不需要交换
         if i == j:
             return
         
@@ -284,6 +306,7 @@ class MseAlphaPool(LinearAlphaPool):
 
     def optimize(self, lr: float = 5e-4, max_steps: int = 10000, tolerance: int = 500) -> np.ndarray:
         alpha = self._l1_alpha
+        # 如果 alpha 接近 0，则不使用 L1 正则化，使用更快的最小二乘法
         if math.isclose(alpha, 0.):     # No L1 regularization, use the faster least-squares method
             return self._optimize_lstsq()
             
@@ -308,15 +331,18 @@ class MseAlphaPool(LinearAlphaPool):
             loss.backward()
             optim.step()
     
+            # 检查损失改善是否小于阈值
             if loss_ic_min - loss_ic_curr > 1e-6:
                 tolerance_count = 0
             else:
                 tolerance_count += 1
     
+            # 更新最佳权重
             if loss_ic_curr < loss_ic_min:
                 best_weights = weights
                 loss_ic_min = loss_ic_curr
     
+            # 检查是否达到容忍度或最大步数
             if tolerance_count >= tolerance or step >= max_steps:
                 break
     
@@ -366,9 +392,11 @@ class MeanStdAlphaPool(LinearAlphaPool):
         weighted = (weights[:, None, None] * alpha_values).sum(dim=0)
         ics = batch_pearsonr(weighted, target_value)
         mean, std = ics.mean(), ics.std()
+        # 如果设置了 beta，则使用 LCB 目标
         if self._lcb_beta is not None:
             return mean - self._lcb_beta * std
         else:
+            # 否则使用 ICIR 目标
             return mean / std
 
     def optimize(self, lr: float = 5e-4, max_steps: int = 10000, tolerance: int = 500) -> np.ndarray:
@@ -389,15 +417,18 @@ class MeanStdAlphaPool(LinearAlphaPool):
             loss.backward()
             optimizer.step()
     
+            # 检查损失改善是否小于阈值
             if min_loss - curr_loss > 1e-6:
                 tol_count = 0
             else:
                 tol_count += 1
     
+            # 更新最佳权重
             if curr_loss < min_loss:
                 best_weights = weights
                 min_loss = curr_loss
     
+            # 检查是否达到容忍度或最大步数
             if tol_count >= tolerance or step >= max_steps:
                 break
     
