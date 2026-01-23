@@ -25,21 +25,30 @@ from alphagen_llm.prompts.interaction import InterativeSession, DefaultInteracti
 
 
 def read_alphagpt_init_pool(seed: int) -> List[Expression]:
+    """
+    读取由 AlphaGPT 预先生成的初始因子池。
+    """
     DIR = "./out/llm-tests/interaction"
     parser = build_parser()
+    # 遍历指定目录，查找匹配种子号的报告文件
     for path in Path(DIR).glob(f"v0_{seed}*"):
         with open(path / "report.json") as f:
             data = json.load(f)
             pool_state = data[-1]["pool_state"]
+            # 解析并返回因子表达式列表
             return [parser.parse(expr) for expr, _ in pool_state]
     return []
 
 
 def build_parser() -> ExpressionParser:
+    """
+    构建并配置一个表达式解析器。
+    """
     return ExpressionParser(
         Operators,
         ignore_case=True,
         non_positive_time_deltas_allowed=False,
+        # 为一些非标准的操作符名称提供映射
         additional_operator_mapping={
             "Max": [Greater],
             "Min": [Less],
@@ -49,6 +58,9 @@ def build_parser() -> ExpressionParser:
 
 
 def build_chat_client(log_dir: str) -> ChatClient:
+    """
+    构建并配置一个与大语言模型交互的客户端。
+    """
     logger = get_logger("llm", os.path.join(log_dir, "llm.log"))
     return OpenAIClient(
         client=OpenAI(base_url="https://api.ai.cs.ac.cn/v1"),
@@ -60,6 +72,9 @@ def build_chat_client(log_dir: str) -> ChatClient:
 
 
 class CustomCallback(BaseCallback):
+    """
+    自定义的回调函数，用于在训练过程中执行特定操作，如保存模型、评估因子池、与LLM交互等。
+    """
     def __init__(
         self,
         save_path: str,
@@ -69,6 +84,9 @@ class CustomCallback(BaseCallback):
         llm_every_n_steps: int = 25_000,
         drop_rl_n: int = 5
     ):
+        """
+        初始化回调函数。
+        """
         super().__init__(verbose)
         self.save_path = save_path
         self.test_calculators = test_calculators
@@ -82,16 +100,26 @@ class CustomCallback(BaseCallback):
         self._drop_rl_n = drop_rl_n
 
     def _on_step(self) -> bool:
+        """
+        在每个训练步骤后调用，返回 True 以继续训练。
+        """
         return True
 
     def _on_rollout_end(self) -> None:
+        """
+        在每次 rollout (数据收集) 结束后调用。
+        """
+        # 如果配置了聊天会话，则尝试调用 LLM
         if self.chat_session is not None:
             self._try_use_llm()
 
+        # 记录因子池的各种状态指标
         self.logger.record('pool/size', self.pool.size)
         self.logger.record('pool/significant', (np.abs(self.pool.weights[:self.pool.size]) > 1e-4).sum())
         self.logger.record('pool/best_ic_ret', self.pool.best_ic_ret)
         self.logger.record('pool/eval_cnt', self.pool.eval_cnt)
+        
+        # 在测试集上评估当前因子池的表现
         n_days = sum(calculator.data.n_days for calculator in self.test_calculators)
         ic_test_mean, rank_ic_test_mean = 0., 0.
         for i, test_calculator in enumerate(self.test_calculators, start=1):
@@ -102,17 +130,26 @@ class CustomCallback(BaseCallback):
             self.logger.record(f'test/rank_ic_{i}', rank_ic_test)
         self.logger.record(f'test/ic_mean', ic_test_mean)
         self.logger.record(f'test/rank_ic_mean', rank_ic_test_mean)
+        
+        # 保存模型和因子池的快照
         self.save_checkpoint()
 
     def save_checkpoint(self):
+        """
+        保存模型和因子池状态到文件。
+        """
         path = os.path.join(self.save_path, f'{self.num_timesteps}_steps')
         self.model.save(path)   # type: ignore
+        # 如果详细模式开启，打印保存信息
         if self.verbose > 1:
             print(f'Saving model checkpoint to {path}')
         with open(f'{path}_pool.json', 'w') as f:
             json.dump(self.pool.to_json_dict(), f)
 
     def show_pool_state(self):
+        """
+        在控制台打印当前因子池的详细状态。
+        """
         state = self.pool.state
         print('---------------------------------------------')
         for i in range(self.pool.size):
@@ -124,7 +161,11 @@ class CustomCallback(BaseCallback):
         print('---------------------------------------------')
 
     def _try_use_llm(self) -> None:
+        """
+        尝试调用大语言模型来优化因子池。
+        """
         n_steps = self.num_timesteps
+        # 判断是否达到了调用 LLM 的时间间隔
         if n_steps - self.last_llm_use < self.llm_every_n_steps:
             return
         self.last_llm_use = n_steps
@@ -138,6 +179,7 @@ class CustomCallback(BaseCallback):
             f"IC={self.pool.best_ic_ret:.4f}, obj={self.pool.best_ic_ret:.4f}")
 
         try:
+            # 在调用 LLM 前，先移除一部分由 RL 生成的、权重较低的因子
             remain_n = max(0, self.pool.size - self._drop_rl_n)
             remain = self.pool.most_significant_indices(remain_n)
             self.pool.leave_only(remain)
@@ -147,11 +189,17 @@ class CustomCallback(BaseCallback):
 
     @property
     def pool(self) -> LinearAlphaPool:
+        """
+        获取环境中的因子池对象。
+        """
         assert(isinstance(self.env_core.pool, LinearAlphaPool))
         return self.env_core.pool
 
     @property
     def env_core(self) -> AlphaEnvCore:
+        """
+        获取底层的 AlphaEnvCore 环境实例。
+        """
         return self.training_env.envs[0].unwrapped  # type: ignore
 
 
@@ -166,9 +214,13 @@ def run_single_experiment(
     drop_rl_n: int = 5,
     llm_replace_n: int = 3
 ):
+    """
+    运行单次完整的强化学习实验。
+    """
     reseed_everything(seed)
     initialize_qlib("~/.qlib/qlib_data/cn_data")
 
+    # 如果不使用 LLM，则替换的因子数量为 0
     llm_replace_n = 0 if not use_llm else llm_replace_n
     print(f"""[Main] Starting training process
     Seed: {seed}
@@ -183,6 +235,7 @@ def run_single_experiment(
 
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     # tag = "rlv2" if llm_add_subexpr == 0 else f"afs{llm_add_subexpr}aar1-5"
+    # 根据实验配置生成一个标签，用于区分不同的实验类型
     tag = (
         "agpt" if alphagpt_init else
         "rl" if not use_llm else
@@ -196,6 +249,7 @@ def run_single_experiment(
     target = Ref(close, -20) / close - 1
 
     def get_dataset(start: str, end: str) -> StockData:
+        """辅助函数，用于获取指定时间段的股票数据。"""
         return StockData(
             instrument=instruments,
             start_time=start,
@@ -203,6 +257,7 @@ def run_single_experiment(
             device=device
         )
 
+    # 定义训练和测试的时间段
     segments = [
         ("2012-01-01", "2021-12-31"),
         ("2022-01-01", "2022-06-30"),
@@ -213,6 +268,7 @@ def run_single_experiment(
     calculators = [QLibStockDataCalculator(d, target) for d in datasets]
 
     def build_pool(exprs: List[Expression]) -> LinearAlphaPool:
+        """辅助函数，用于构建一个因子池实例。"""
         pool = MseAlphaPool(
             capacity=pool_capacity,
             calculator=calculators[0],
@@ -220,13 +276,16 @@ def run_single_experiment(
             l1_alpha=5e-3,
             device=device
         )
+        # 如果提供了初始表达式，则强制加载它们
         if len(exprs) != 0:
             pool.force_load_exprs(exprs)
         return pool
 
     chat, inter, pool = None, None, build_pool([])
+    # 如果使用 AlphaGPT 方式初始化，则读取预生成的因子池
     if alphagpt_init:
         pool = build_pool(read_alphagpt_init_pool(seed))
+    # 如果使用 LLM 交互，则构建客户端和交互会话
     elif use_llm:
         chat = build_chat_client(save_path)
         inter = DefaultInteraction(
@@ -236,11 +295,13 @@ def run_single_experiment(
         )
         pool = inter.run()
 
+    # 创建强化学习环境
     env = AlphaEnv(
         pool=pool,
         device=device,
         print_expr=True
     )
+    # 创建自定义回调
     checkpoint_callback = CustomCallback(
         save_path=save_path,
         test_calculators=calculators[1:],
@@ -249,6 +310,7 @@ def run_single_experiment(
         llm_every_n_steps=llm_every_n_steps,
         drop_rl_n=drop_rl_n
     )
+    # 创建并配置 PPO 模型
     model = MaskablePPO(
         "MlpPolicy",
         env,
@@ -268,6 +330,7 @@ def run_single_experiment(
         device=device,
         verbose=1,
     )
+    # 开始训练
     model.learn(
         total_timesteps=steps,
         callback=checkpoint_callback,
@@ -294,15 +357,32 @@ def main(
     :param drop_rl_n: Drop n worst alphas before invoke the LLM
     :param steps: Total iteration steps
     :param llm_every_n_steps: Invoke LLM every n steps
+
+    主函数，用于批量运行实验。
+
+    :param random_seeds: 随机种子，可以是一个整数或一个整数元组，用于多次实验。
+    :param pool_capacity: 因子池的最大容量。
+    :param instruments: 股票池的名称 (例如 'csi300', 'csi500')。
+    :param alphagpt_init: 是否使用由 LLM 预先生成的一组因子作为初始池。
+    :param use_llm: 是否在训练过程中启用 LLM 进行交互式优化。
+    :param drop_rl_n: 在调用 LLM 之前，从池中移除表现最差的 n 个由 RL 生成的因子。
+    :param steps: 总的训练步数。如果为 None，则根据因子池容量使用默认值。
+    :param llm_every_n_steps: 每隔 n 步调用一次 LLM。
     """
+    
+    # 如果只提供了一个整数种子，将其转换为元组以便迭代
     if isinstance(random_seeds, int):
         random_seeds = (random_seeds, )
+    
+    # 根据因子池容量设置默认的训练步数
     default_steps = {
         10: 200_000,
         20: 250_000,
         50: 300_000,
         100: 350_000
     }
+    
+    # 遍历所有种子，运行实验
     for s in random_seeds:
         run_single_experiment(
             seed=s,
@@ -317,4 +397,5 @@ def main(
 
 
 if __name__ == '__main__':
+    # 使用 fire 库将 main 函数暴露
     fire.Fire(main)
