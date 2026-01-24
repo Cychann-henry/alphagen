@@ -68,21 +68,37 @@ class StockData:
         cal: np.ndarray = D.calendar()
         start_index = cal.searchsorted(pd.Timestamp(self._start_time))  # type: ignore
         end_index = cal.searchsorted(pd.Timestamp(self._end_time))  # type: ignore
+        if end_index == len(cal):
+            end_index -= 1
         real_start_time = cal[start_index - self.max_backtrack_days]
         if cal[end_index] != pd.Timestamp(self._end_time):
             end_index -= 1
-        real_end_time = cal[end_index + self.max_future_days]
+        
+        end_index_with_future = min(end_index + self.max_future_days, len(cal) - 1)
+        real_end_time = cal[end_index_with_future]
+        
         return (QlibDataLoader(config=exprs)  # type: ignore
                 .load(self._instrument, real_start_time, real_end_time))
 
     def _get_data(self) -> Tuple[torch.Tensor, pd.Index, pd.Index]:
         features = ['$' + f.name.lower() for f in self._features]
         df = self._load_exprs(features)
-        df = df.stack().unstack(level=1)
-        dates = df.index.levels[0]                                      # type: ignore
-        stock_ids = df.columns
+        dates = df.index
+        if isinstance(df.columns, pd.MultiIndex):
+            # Case 1: Multi-index columns (feature, stock_id) - Correct case
+            stock_ids = df.columns.get_level_values(1).unique()
+        else:
+            # Case 2: Single-index columns, happens with one stock
+            # The columns are features, not stock_ids
+            if isinstance(self._instrument, list):
+                stock_ids = pd.Index(self._instrument)
+            else: # it's a string
+                stock_ids = pd.Index([self._instrument])
+        
         values = df.values
-        values = values.reshape((-1, len(features), values.shape[-1]))  # type: ignore
+        # The shape from qlib is (n_days, n_features * n_stocks)
+        # We need to reshape it to (n_days, n_features, n_stocks)
+        values = values.reshape((len(dates), len(features), len(stock_ids)))
         return torch.tensor(values, dtype=torch.float, device=self.device), dates, stock_ids
 
     def __getitem__(self, slc: slice) -> "StockData":
