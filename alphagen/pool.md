@@ -6,36 +6,32 @@ graph TD
     classDef terminator fill:#e0e0e0,stroke:#333,stroke-width:2px;
     classDef critical fill:#ffccbc,stroke:#d84315,stroke-width:4px;
 
-    Start([输入: 新生成的 Expression]) --> CalcSingle[计算单因子 IC]
+    Start(["输入: 新 Expression"]) --> CalcICs["1. 计算新因子的 IC 及互相关性"]:::process
     
-    CalcSingle --> CheckLow{IC < 阈值?}:::decision
-    CheckLow -- 是 --> Reject([拒绝: Return 0]):::terminator
-    CheckLow -- 否 --> CheckCorr[计算与池内因子的互相关性 Mutual IC]
+    CalcICs --> CheckValidity{"IC 有效且高于阈值?"}:::decision
+    CheckValidity -- 否 --> Reject(["拒绝: Return 0.0"]):::terminator
     
-    CheckCorr --> IsDuplicate{相关性 > 0.99?}:::decision
-    IsDuplicate -- 是 (重复造轮子) --> Reject
-    IsDuplicate -- 否 --> AddToPool[暂时加入 exprs 列表]:::process
+    CheckValidity -- 是 --> AddToPool["2. 暂时将新因子加入池中"]:::process
     
-    AddToPool --> Optimize[权重优化 optimize()]:::critical
+    AddToPool --> Optimize["3. 运行权重优化 (optimize)"]:::critical
     
-    subgraph WeightOptimization [权重优化黑盒 (MseAlphaPool / MeanStdAlphaPool)]
-        direction TB
-        OptStart[构建目标函数: Loss = ICIR 或 MSE]
-        Adam[运行 Adam 梯度下降 或 最小二乘法]
-        NewWeights[产出新权重向量 w]
-        OptStart --> Adam --> NewWeights
-    end
+    Optimize --> CheckCapacity{"池子是否超出容量?"}:::decision
     
-    Optimize --> WeightOptimization
-    WeightOptimization --> CheckCapacity{池子满了吗?}:::decision
+    CheckCapacity -- 否 --> CalcObjective["5. 计算新目标函数值 (如 ICIR)"]:::process
     
-    CheckCapacity -- 否 --> CalcIncrement
-    CheckCapacity -- 是 (Size > Capacity) --> Pruning[末位淘汰: _pop()]:::process
+    CheckCapacity -- 是 --> Pruning["4. 末位淘汰"]:::process
+    Pruning --> FindWorst["找到新权重中绝对值最小的因子"]
+    FindWorst --> IsNewFactorWorst{"被淘汰的是刚加入的新因子?"}:::decision
     
-    Pruning --> FindWorst[找到权重绝对值最小的索引]
-    FindWorst --> Remove[移除该因子]
-    Remove --> CalcIncrement
+    IsNewFactorWorst -- 是 --> RevertAndCache["撤销本次添加并缓存为失败"]:::process
+    RevertAndCache --> ReturnBestObj(["返回之前的 best_obj"]):::terminator
     
-    CalcIncrement[计算 IC 增量: New_Pool_IC - Old_Pool_IC]:::process
-    CalcIncrement --> Reward([输出 Reward 给 RL]):::terminator
+    IsNewFactorWorst -- 否 --> RemoveWorst["从池中移除权重最小的老因子"]
+    RemoveWorst --> CalcObjective
+    
+    CalcObjective --> UpdateBest{"新目标值 > best_obj?"}:::decision
+    UpdateBest -- 是 --> SaveNewBest["更新 best_obj 和 best_ic"]
+    SaveNewBest --> ReturnNewObj(["返回新的 best_obj"]):::terminator
+    
+    UpdateBest -- 否 --> ReturnNewObj
 ```
