@@ -8,19 +8,22 @@ TARGET_ENV="alphagen_env"
 # 训练参数
 GPU_ID="1"
 SEED=1
-BATCH_SIZE=4096
-STEPS=2000000
+# BATCH_SIZE 在 rl.py 中硬编码，此处设置无效
+# BATCH_SIZE=4096
+STEPS=200000
 
 # 路径
-SAVE_PATH="./experiments/${EXP_NAME}"
-LOG_PATH="${SAVE_PATH}/tb_logs"
-# 日志文件 (你的眼睛)
-OUTPUT_LOG="${SAVE_PATH}/training_log.txt"
+# SAVE_PATH 和 LOG_PATH 在 rl.py 中硬编码，此处设置无效
+# SAVE_PATH="./experiments/${EXP_NAME}"
+# LOG_PATH="${SAVE_PATH}/tb_logs"
+# 日志文件 (你的眼睛) - 此路径保持不变
+OUTPUT_LOG="./experiments/${EXP_NAME}/training_log.txt"
 
 # ===========================================
 
 # 1. 检查目录
-if [ ! -d "$SAVE_PATH" ]; then mkdir -p "$SAVE_PATH"; fi
+# 只需确保 nohup 日志的目录存在
+if [ ! -d "$(dirname "$OUTPUT_LOG")" ]; then mkdir -p "$(dirname "$OUTPUT_LOG")"; fi
 
 echo "----------------------------------------------------"
 echo "🚀 AlphaGen 启动脚本 (Nohup版 - 无需Tmux)"
@@ -34,14 +37,14 @@ fi
 
 echo "✅ 环境已激活，准备后台运行..."
 echo "📄 实时日志将输出到: $OUTPUT_LOG"
+echo "⚠️ 注意: 训练结果(模型, 因子池, Tensorboard)将输出到默认的 'out/' 目录。"
 
 # 3. 构造核心命令
+# 只向 rl.py 传递它能识别的参数。
+# 其他参数如 device, save_path, tensorboard_log 等在 rl.py 内部硬编码，
+# 从命令行传递是无效的，并且会导致程序在最后崩溃。
 CMD="python -m scripts.rl \
-    --device cuda:0 \
     --seed $SEED \
-    --save_path '$SAVE_PATH' \
-    --tensorboard_log '$LOG_PATH' \
-    --batch_size $BATCH_SIZE \
     --steps $STEPS"
 
 # 4. 使用 nohup 后台启动
