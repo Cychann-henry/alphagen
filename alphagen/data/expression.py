@@ -71,6 +71,24 @@ class Constant(Expression):
         device = data.data.device
         dtype = data.data.dtype
         days = period.stop - period.start - 1 + data.n_days
+        # --- DEBUG 增量 ---
+        try:
+            data_len = len(data._dates)
+        except:
+            # 如果 StockData 没有 _dates 或 len，回退以便查看其他信息
+            data_len = -999
+        if days <= 0:
+            print("-" * 60)
+            print(f"DEBUG CRASH in Constant({self.value}).evaluate:")
+            print(f"  data_len (len(data._dates)): {data_len}")
+            print(f"  period arg: {period}")
+            print(f"  calculated days: {days}")
+            if hasattr(data, '_instrument'):
+                print(f"  instrument: {data._instrument}")
+            if hasattr(data, '_start_time'):
+                print(f"  data time: {data._start_time} to {data._end_time}")
+            print("-" * 60)
+        # --- DEBUG 结束 ---
         return torch.full(size=(days, data.n_stocks),
                           fill_value=self.value, dtype=dtype, device=device)
 

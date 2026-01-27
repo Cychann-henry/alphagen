@@ -14,7 +14,8 @@ class FeatureType(IntEnum):
     VWAP = 5
 
 
-_DEFAULT_QLIB_DATA_PATH = "~/.qlib/qlib_data/cn_data"
+# 修改：将默认路径指向包含完整数据的 cn_data_2024h1
+_DEFAULT_QLIB_DATA_PATH = "~/.qlib/qlib_data/cn_data_2024h1"
 _QLIB_INITIALIZED = False
 
 
@@ -66,39 +67,70 @@ class StockData:
         if not isinstance(exprs, list):
             exprs = [exprs]
         cal: np.ndarray = D.calendar()
+        
+        # --- 调试代码开始 ---
+        if len(cal) > 0:
+            print(f"DEBUG: Calendar range: {cal[0]} to {cal[-1]}")
+        else:
+            print("DEBUG: Calendar is EMPTY!")
+            
         start_index = cal.searchsorted(pd.Timestamp(self._start_time))  # type: ignore
         end_index = cal.searchsorted(pd.Timestamp(self._end_time))  # type: ignore
-        if end_index == len(cal):
-            end_index -= 1
+
+        print(f"DEBUG: instrument={self._instrument}")
+        print(f"DEBUG: start_time={self._start_time} end_time={self._end_time}")
+        print(f"DEBUG: cal len={len(cal)} start_index={start_index} end_index={end_index}")
+
         real_start_time = cal[start_index - self.max_backtrack_days]
-        if cal[end_index] != pd.Timestamp(self._end_time):
+        if end_index >= len(cal) or cal[end_index] != pd.Timestamp(self._end_time):
             end_index -= 1
         
-        end_index_with_future = min(end_index + self.max_future_days, len(cal) - 1)
-        real_end_time = cal[end_index_with_future]
-        
+        # 修改：增加 min 限制，确保索引不超过日历最大长度 (len(cal) - 1)
+        future_index = min(end_index + self.max_future_days, len(cal) - 1)
+        real_end_time = cal[future_index]
+
         return (QlibDataLoader(config=exprs)  # type: ignore
                 .load(self._instrument, real_start_time, real_end_time))
 
     def _get_data(self) -> Tuple[torch.Tensor, pd.Index, pd.Index]:
         features = ['$' + f.name.lower() for f in self._features]
         df = self._load_exprs(features)
-        dates = df.index
-        if isinstance(df.columns, pd.MultiIndex):
-            # Case 1: Multi-index columns (feature, stock_id) - Correct case
-            stock_ids = df.columns.get_level_values(1).unique()
+
+        # --- DEBUG 增量 ---
+        print("-" * 40)
+        print(f"DEBUG _get_data: Loaded df shape: {df.shape}")
+        if df.empty:
+            print("DEBUG _get_data: WARNING! df is empty. This explains why data_len is 0.")
+            print(f"DEBUG _get_data: Requested range: {self._start_time} to {self._end_time}")
         else:
-            # Case 2: Single-index columns, happens with one stock
-            # The columns are features, not stock_ids
-            if isinstance(self._instrument, list):
-                stock_ids = pd.Index(self._instrument)
-            else: # it's a string
-                stock_ids = pd.Index([self._instrument])
+            print(f"DEBUG _get_data: df index head: {df.index[:3]}")
+            if isinstance(df.index, pd.MultiIndex):
+                dates = df.index.get_level_values(0).unique()
+                print(f"DEBUG _get_data: MultiIndex unique dates count: {len(dates)}")
+        print("-" * 40)
+        # --- DEBUG 结束 ---
         
+        # 修复逻辑：处理不规则数据
+        if isinstance(df.index, pd.MultiIndex):
+             # 1. 它是 MultiIndex (datetime, instrument)，我们将其 unstack 变成 (datetime, instrument * features)
+             # 这会自动处理缺失数据，用 NaN 填充孔洞
+             df = df.unstack(level=1)
+             
+             # 2. 这里的 df.values 形状现在是 (n_days, n_features * n_stocks)
+             # 我们需要提取正确的维度
+             dates = df.index
+             # columns 是 MultiIndex (feature, stock)
+             stock_ids = df.columns.levels[1] 
+        else:
+            # 原始逻辑保持兼容
+            dates = df.index
+            stock_ids = df.columns
+
         values = df.values
-        # The shape from qlib is (n_days, n_features * n_stocks)
-        # We need to reshape it to (n_days, n_features, n_stocks)
+        # 3. 此时 values 的第0维是天数，第1维是 (特征数 * 股票数)
+        # 我们按照这个形状进行 reshape
         values = values.reshape((len(dates), len(features), len(stock_ids)))
+        
         return torch.tensor(values, dtype=torch.float, device=self.device), dates, stock_ids
 
     def __getitem__(self, slc: slice) -> "StockData":
