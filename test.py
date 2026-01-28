@@ -3,9 +3,9 @@ from qlib.data import D
 from qlib.constant import REG_CN
 import pandas as pd
 import os
-
+#同步测试
 # 1. 这里的路径必须和你的数据下载脚本 (fetch_baostock_data.py) 中的 qlib_export_path 一致
-provider_uri = os.path.expanduser("~/.qlib/qlib_data/cn_data_2024h1")
+provider_uri = os.path.exSpanduser("~/.qlib/qlib_data/cn_data_2024h1")
 
 print(f"Checking data in: {provider_uri}")
 
