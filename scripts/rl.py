@@ -218,7 +218,9 @@ def run_single_experiment(
     运行单次完整的强化学习实验。
     """
     reseed_everything(seed)
-    initialize_qlib("~/.qlib/qlib_data/cn_data")
+    
+    # 修改：将初始化路径指向 cn_data_2024h1，确保能读取到 2022-2023 年的数据
+    initialize_qlib("~/.qlib/qlib_data/cn_data_2024h1")
 
     # 如果不使用 LLM，则替换的因子数量为 0
     llm_replace_n = 0 if not use_llm else llm_replace_n
