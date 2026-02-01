@@ -82,7 +82,8 @@ class CustomCallback(BaseCallback):
         verbose: int = 0,
         chat_session: Optional[InterativeSession] = None,
         llm_every_n_steps: int = 25_000,
-        drop_rl_n: int = 5
+        drop_rl_n: int = 5,
+        pool_capacity: int = 10   # <--- 修改 1: 新增参数
     ):
         """
         初始化回调函数。
@@ -98,6 +99,7 @@ class CustomCallback(BaseCallback):
         self.llm_every_n_steps = llm_every_n_steps
         self.chat_session = chat_session
         self._drop_rl_n = drop_rl_n
+        self.pool_capacity = pool_capacity  # <--- 修改 2: 保存因子池容量
 
     def _on_step(self) -> bool:
         """
@@ -143,7 +145,11 @@ class CustomCallback(BaseCallback):
         # 如果详细模式开启，打印保存信息
         if self.verbose > 1:
             print(f'Saving model checkpoint to {path}')
-        with open(f'{path}_pool.json', 'w') as f:
+        
+        # 修改 3: 文件名增加因子池容量后缀
+        # 原来是: f'{path}_pool.json'
+        # 现在变为: f'{path}_pool_{self.pool_capacity}.json'
+        with open(f'{path}_pool_{self.pool_capacity}.json', 'w') as f:
             json.dump(self.pool.to_json_dict(), f)
 
     def show_pool_state(self):
@@ -261,10 +267,10 @@ def run_single_experiment(
 
     # 定义训练和测试的时间段
     segments = [
-        ("2012-01-01", "2021-12-31"),
-        ("2022-01-01", "2022-06-30"),
-        ("2022-07-01", "2022-12-31"),
-        ("2023-01-01", "2023-06-30")
+        ("2012-01-01", "2023-12-31"),
+        ("2024-01-01", "2024-06-30"),
+        ("2024-07-01", "2024-12-31"),
+        ("2025-01-01", "2025-09-30")
     ]
     datasets = [get_dataset(*s) for s in segments]
     calculators = [QLibStockDataCalculator(d, target) for d in datasets]
@@ -310,7 +316,8 @@ def run_single_experiment(
         verbose=1,
         chat_session=inter,
         llm_every_n_steps=llm_every_n_steps,
-        drop_rl_n=drop_rl_n
+        drop_rl_n=drop_rl_n,
+        pool_capacity=pool_capacity  # <--- 修改 4: 传递参数
     )
     # 创建并配置 PPO 模型
     model = MaskablePPO(
