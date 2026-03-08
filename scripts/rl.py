@@ -1,7 +1,9 @@
 import json
 import os
+import shutil
 from typing import Optional, Tuple, List
-from datetime import datetime
+from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 from pathlib import Path
 from openai import OpenAI
 import fire
@@ -83,7 +85,9 @@ class CustomCallback(BaseCallback):
         chat_session: Optional[InterativeSession] = None,
         llm_every_n_steps: int = 25_000,
         drop_rl_n: int = 5,
-        pool_capacity: int = 10   # <--- 修改 1: 新增参数
+        pool_capacity: int = 10,
+        segments: Optional[List[Tuple[str, str]]] = None,
+        train_end_date: str = ""
     ):
         """
         初始化回调函数。
@@ -99,7 +103,9 @@ class CustomCallback(BaseCallback):
         self.llm_every_n_steps = llm_every_n_steps
         self.chat_session = chat_session
         self._drop_rl_n = drop_rl_n
-        self.pool_capacity = pool_capacity  # <--- 修改 2: 保存因子池容量
+        self.pool_capacity = pool_capacity
+        self.segments = segments or []
+        self.train_end_date = train_end_date
 
     def _on_step(self) -> bool:
         """
@@ -265,12 +271,41 @@ def run_single_experiment(
             device=device
         )
 
-    # 定义训练和测试的时间段
+    # ====== 动态计算训练和测试时间段 ======
+    # 以当前日期往前推7天作为最后测试段的末尾，3个测试段各半年依次往前推导
+    # 训练段从2012年开始到第一个测试段之前
+
+    today = datetime.now().date()
+    test_end = today - timedelta(days=7)                        # 最后测试段末尾
+    test3_start = test_end - relativedelta(months=6) + timedelta(days=1)  # 第4段起始
+    test2_end = test3_start - timedelta(days=1)                 # 第3段末尾
+    test2_start = test2_end - relativedelta(months=6) + timedelta(days=1)  # 第3段起始
+    test1_end = test2_start - timedelta(days=1)                 # 第2段末尾
+    test1_start = test1_end - relativedelta(months=6) + timedelta(days=1)  # 第2段起始
+    train_start = "2012-01-01"                                  # 训练段起始（固定）
+    train_end = test1_start - timedelta(days=1)                 # 训练段末尾
+
+    # 格式化日期为字符串
+    train_start_str = train_start
+    train_end_str = train_end.strftime("%Y-%m-%d")
+    test1_start_str = test1_start.strftime("%Y-%m-%d")
+    test1_end_str = test1_end.strftime("%Y-%m-%d")
+    test2_start_str = test2_start.strftime("%Y-%m-%d")
+    test2_end_str = test2_end.strftime("%Y-%m-%d")
+    test3_start_str = test3_start.strftime("%Y-%m-%d")
+    test3_end_str = test_end.strftime("%Y-%m-%d")
+
+    print(f"[Main] 时间段划分:")
+    print(f"  训练段:   {train_start_str} ~ {train_end_str}")
+    print(f"  测试段1:  {test1_start_str} ~ {test1_end_str}")
+    print(f"  测试段2:  {test2_start_str} ~ {test2_end_str}")
+    print(f"  测试段3:  {test3_start_str} ~ {test3_end_str}")
+
     segments = [
-        ("2012-01-01", "2023-12-31"),
-        ("2024-01-01", "2024-12-31"),
-        ("2025-01-01", "2025-06-30"),
-        ("2025-07-01", "2026-01-25")
+        (train_start_str, train_end_str),
+        (test1_start_str, test1_end_str),
+        (test2_start_str, test2_end_str),
+        (test3_start_str, test3_end_str)
     ]
     datasets = [get_dataset(*s) for s in segments]
     calculators = [QLibStockDataCalculator(d, target) for d in datasets]
@@ -317,7 +352,9 @@ def run_single_experiment(
         chat_session=inter,
         llm_every_n_steps=llm_every_n_steps,
         drop_rl_n=drop_rl_n,
-        pool_capacity=pool_capacity  # <--- 修改 4: 传递参数
+        pool_capacity=pool_capacity,
+        segments=segments,
+        train_end_date=train_end_str
     )
     # 创建并配置 PPO 模型
     model = MaskablePPO(
@@ -345,6 +382,66 @@ def run_single_experiment(
         callback=checkpoint_callback,
         tb_log_name=name_prefix,
     )
+
+    # ====== 训练完成后，自动保存最终因子池到统一目录 ======
+    latest_dir = os.path.join("./out/latest_factors")
+    os.makedirs(latest_dir, exist_ok=True)
+
+    # 找到当前实验目录中步数最大的因子池文件
+    pool_files = [
+        f for f in os.listdir(save_path)
+        if f.endswith(f'_pool_{pool_capacity}.json')
+    ]
+    if pool_files:
+        # 按步数排序，取最大的
+        def extract_steps(filename: str) -> int:
+            try:
+                return int(filename.split('_steps_pool')[0])
+            except (ValueError, IndexError):
+                return 0
+        pool_files.sort(key=extract_steps)
+        latest_pool_file = pool_files[-1]
+        final_steps = extract_steps(latest_pool_file)
+
+        # 生成统一的标准文件名
+        latest_pool_name = f"pool_{instruments}_{pool_capacity}_{test3_end_str}.json"
+        src = os.path.join(save_path, latest_pool_file)
+        dst = os.path.join(latest_dir, latest_pool_name)
+        shutil.copy2(src, dst)
+
+        # 保存元数据
+        metadata = {
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "instruments": instruments,
+            "pool_capacity": pool_capacity,
+            "total_steps": final_steps,
+            "seed": seed,
+            "train_end_date": train_end_str,
+            "test_end_date": test3_end_str,
+            "segments": {
+                "train": {"start": train_start_str, "end": train_end_str},
+                "test1": {"start": test1_start_str, "end": test1_end_str},
+                "test2": {"start": test2_start_str, "end": test2_end_str},
+                "test3": {"start": test3_start_str, "end": test3_end_str}
+            },
+            "pool_file": latest_pool_name,
+            "source_experiment": name_prefix,
+            "source_path": os.path.abspath(os.path.join(save_path, latest_pool_file))
+        }
+        metadata_path = os.path.join(latest_dir, f"metadata_{instruments}_{pool_capacity}_{test3_end_str}.json")
+        with open(metadata_path, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, ensure_ascii=False, indent=2)
+
+        print(f"\n{'='*60}")
+        print(f"✅ 最终因子池已保存到: {dst}")
+        print(f"📋 元数据已保存到: {metadata_path}")
+        print(f"   - 训练结束日期: {train_end_str}")
+        print(f"   - 测试结束日期: {test3_end_str}")
+        print(f"   - 因子池容量: {pool_capacity}")
+        print(f"   - 训练步数: {final_steps}")
+        print(f"{'='*60}")
+    else:
+        print("\n⚠️ 未找到因子池文件，跳过自动保存。")
 
 
 def main(
