@@ -18,7 +18,7 @@ STEPS=500000
 # SAVE_PATH="./experiments/${EXP_NAME}"
 # LOG_PATH="${SAVE_PATH}/tb_logs"
 # 日志文件 (你的眼睛) - 此路径保持不变
-OUTPUT_LOG="./experiments/${EXP_NAME}/training_log-${POOL_CAPACITY}-${STEPS}}yearto250930.txt"
+OUTPUT_LOG="./experiments/${EXP_NAME}/training_log-${POOL_CAPACITY}-${STEPS}}lastweek.txt"
 
 # ===========================================
 

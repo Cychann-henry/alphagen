@@ -268,9 +268,9 @@ def run_single_experiment(
     # 定义训练和测试的时间段
     segments = [
         ("2012-01-01", "2023-12-31"),
-        ("2024-01-01", "2024-06-30"),
-        ("2024-07-01", "2024-12-31"),
-        ("2025-01-01", "2025-09-30")
+        ("2024-01-01", "2024-12-31"),
+        ("2025-01-01", "2025-06-30"),
+        ("2025-07-01", "2026-01-25")
     ]
     datasets = [get_dataset(*s) for s in segments]
     calculators = [QLibStockDataCalculator(d, target) for d in datasets]
