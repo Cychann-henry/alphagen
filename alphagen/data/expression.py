@@ -482,6 +482,27 @@ class EMA(RollingOperator):
         return (weights * operand).sum(dim=-1)
 
 
+class RSI(RollingOperator):
+    def evaluate(self, data: StockData, period: slice = slice(0, 1)) -> Tensor:
+        start = period.start - self._delta_time
+        stop = period.stop
+        # L: period length (requested time window length)
+        # W: window length (dt for rolling)
+        # S: stock count
+        values = self._operand.evaluate(data, slice(start, stop))   # (L+W, S)
+        values = values.unfold(0, self._delta_time + 1, 1)          # (L, S, W+1)
+        return self._apply(values)                                  # (L, S)
+
+    def _apply(self, operand: Tensor) -> Tensor:
+        # operand shape (L, S, W+1)
+        diff = operand[:, :, 1:] - operand[:, :, :-1]
+        up = torch.relu(diff).mean(dim=-1)
+        down = torch.relu(-diff).mean(dim=-1)
+        total = up + down
+        rsi = torch.where(total > 1e-9, 100 * up / total, torch.full_like(total, 50.0))
+        return rsi
+
+
 class Cov(PairRollingOperator):
     def _apply(self, lhs: Tensor, rhs: Tensor) -> Tensor:
         n = lhs.shape[-1]
@@ -509,7 +530,7 @@ Operators: List[Type[Operator]] = [
     Add, Sub, Mul, Div, Pow, Greater, Less,
     # Rolling
     Ref, Mean, Sum, Std, Var, Skew, Kurt, Max, Min,
-    Med, Mad, Rank, Delta, WMA, EMA,
+    Med, Mad, Rank, Delta, WMA, EMA, RSI,
     # Pair rolling
     Cov, Corr
 ]
