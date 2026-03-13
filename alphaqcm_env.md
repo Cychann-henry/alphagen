@@ -8,10 +8,10 @@
 
 | 项目 | 说明 |
 |------|------|
-| **环境名** | `alphaqcm` |
+| **环境名** | 独立使用时为 `alphaqcm`；**推荐与 alphagen 共用** `alphagen_env`（见第 6 节） |
 | **用途** | 运行 AlphaQCM 相关脚本：QCM 层级（FQF/IQN/QR-DQN + QCM）与 DRL 基线 |
 | **对应代码** | `fqf_iqn_qrdqn`、`qcm_config`、`train_qcm.py`、`train_qcm_csi300.py`、`train_qcm_csi500.py`、`train_drl_csi300.py` |
-| **入口脚本** | `runqcm.sh`（需先激活本环境） |
+| **入口脚本** | `runqcm.sh`（需先激活 conda 环境，默认 `alphagen_env`） |
 
 ---
 
@@ -90,11 +90,48 @@ conda activate /path/to/envs/alphaqcm
 ### 5.3 运行前检查
 
 - 在项目根目录下执行（或保证 `PYTHONPATH` 含项目根）。
-- 使用 `runqcm.sh` 时脚本会检查 `CONDA_DEFAULT_ENV == alphaqcm`，否则会提示先激活环境。
+- 使用 `runqcm.sh` 时脚本会检查 conda 环境（默认与 alphagen 共用 `alphagen_env`），否则会提示先激活环境。
 
 ---
 
-## 6. 与 runqcm.sh 的关系
+## 6. 在现有 alphagen 环境上升级（推荐）
 
-- **runqcm.sh** 假定已存在并激活 **alphaqcm** 环境，不负责创建环境。
-- 环境配置的**权威来源**是 `alphaqcm_env.yml`；本文档（`alphaqcm_env.md`）只记录其**配置逻辑**与**跨机复现**方式，便于在「环境不是在这台机器上配的」的情况下，在别处正确重建或调整环境。
+QCM 基于 alphagen，训练基模与 alphagen 一致，**可与原有 alphagen 共用同一 conda 环境**，无需单独建 `alphaqcm` 环境，从而避免两套环境带来的配置分裂与冲突。
+
+### 6.1 为何可以共用
+
+- **基模一致**：QCM 的 `train_qcm*` 与 alphagen 的 `scripts.rl` 等共用 `alphagen`、`alphagen_qlib`、同一套数据与 calculator。
+- **依赖重叠**：两者都需要 `torch`、`gym`、`pyqlib`、`numpy`、`pandas`、`tensorboard` 等；QCM 额外需要的主要是配置解析（`pyyaml`）和可选 `gymnasium`，其余多为 alphagen 已有或可兼容版本。
+
+### 6.2 可能冲突点与建议
+
+| 项目 | alphagen（当前） | alphaqcm_env.yml（独立环境） | 在 alphagen 上升级时的建议 |
+|------|------------------|------------------------------|-----------------------------|
+| **torch** | 2.0.1（requirements.txt） | 1.13.1+cu116 | **保持现有 torch 不降级**。QCM 代码使用常规 PyTorch API，与 2.x 兼容；若遇兼容问题再考虑单独环境或按 5.2 换 CUDA 版。 |
+| **numpy / pandas** | 1.21.1 / 1.2.4 | 1.23.5 / 1.5.3 | **可选升级**。若现有 alphagen 脚本无版本敏感逻辑，可逐步升级；若有报错再回退或仅装 QCM 增量包（不升级这两项）。 |
+| **pyqlib** | 未锁版本 | 0.9.3 | 建议在升级时加上 `pyqlib==0.9.3`，与 QCM/qlib 数据路径行为一致。 |
+| **stable_baselines3 / sb3_contrib** | 有（scripts/rl.py 用） | 无 | **保留**，QCM 不依赖 SB3，不影响 runqcm。 |
+
+### 6.3 推荐操作：仅装 QCM 增量依赖
+
+在**已激活的 alphagen 环境**下执行，不覆盖已有 torch/numpy/pandas 等，只补充 QCM 所需且当前可能缺失的包：
+
+```bash
+conda activate alphagen_env
+pip install -r requirements_qcm_addon.txt
+```
+
+`requirements_qcm_addon.txt` 仅包含相对 alphagen 的**最小增量**（如 `pyyaml`、`gymnasium`、可选 `pyqlib==0.9.3` 等），不包含 torch/numpy/pandas，以降低冲突概率。若某次安装提示与现有包冲突，可按提示解决或暂时跳过该行。
+
+### 6.4 若仍希望单独使用 alphaqcm 环境
+
+- 保留 `conda env create -f alphaqcm_env.yml` 与 `conda activate alphaqcm` 的用法即可。
+- 此时可将 `runqcm.sh` 中的 `TARGET_ENV` 改为 `alphaqcm`，与 5.3 的检查一致。
+
+---
+
+## 7. 与 runqcm.sh 的关系
+
+- **runqcm.sh** 默认使用与 alphagen 相同的环境（`alphagen_env`），不负责创建环境；若采用「在 alphagen 上升级」方案，只需激活 `alphagen_env` 并可选安装 `requirements_qcm_addon.txt`。
+- 环境配置的**权威来源**：独立环境用 `alphaqcm_env.yml`；在 alphagen 上升级时以现有 `requirements.txt` + `requirements_qcm_addon.txt` 为准。
+- 本文档记录**配置逻辑**与**跨机/升级**方式，便于在非本机或与 alphagen 共用环境时正确复现与避免冲突。

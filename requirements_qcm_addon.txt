@@ -1,0 +1,6 @@
+# QCM 在现有 alphagen 环境上的最小增量依赖（不包含 torch/numpy/pandas，避免覆盖）
+# 使用：conda activate alphagen_env && pip install -r requirements_qcm_addon.txt
+
+PyYAML>=6.0
+gymnasium>=0.29.0
+pyqlib==0.9.3

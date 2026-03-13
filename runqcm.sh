@@ -5,15 +5,15 @@
 # 可选：运行 DRL 基线 train_drl_csi300（使用 config/ 下配置，非 qcm_config）
 #
 # 环境适配：
-#   1) 创建 conda 环境: conda env create -f alphaqcm_env.yml
-#   2) 激活环境: conda activate alphaqcm
-#   3) 需在项目根目录执行（脚本会自动 cd 到根目录）；依赖 PYTHONPATH 已在本脚本中设置
-#   4) Windows 下可用 Git Bash 或 WSL 运行本脚本
+#   与 alphagen 共用同一 conda 环境（推荐）：conda activate alphagen_env，可选 pip install -r requirements_qcm_addon.txt
+#   或单独建 alphaqcm 环境：conda env create -f alphaqcm_env.yml && conda activate alphaqcm
+#   需在项目根目录执行（脚本会自动 cd 到根目录）；依赖 PYTHONPATH 已在本脚本中设置
+#   Windows 下可用 Git Bash 或 WSL 运行本脚本
 # =============================================================================
 
 # ----------------------------- 配置区域 -----------------------------
-# 目标 conda 环境（需先创建：conda env create -f alphaqcm_env.yml）
-TARGET_ENV="alphaqcm"
+# 目标 conda 环境（与 alphagen 一致，推荐 alphagen_env；若用独立 QCM 环境则改为 alphaqcm）
+TARGET_ENV="alphagen_env"
 
 # GPU
 GPU_ID="${CUDA_VISIBLE_DEVICES:-0}"
@@ -38,8 +38,8 @@ cd "$SCRIPT_DIR" || exit 1
 
 # 1. 环境检查
 if [ -z "$CONDA_DEFAULT_ENV" ] || [ "$CONDA_DEFAULT_ENV" != "$TARGET_ENV" ]; then
-    echo "请先激活 QCM 环境: conda activate $TARGET_ENV"
-    echo "若未创建环境，请先执行: conda env create -f alphaqcm_env.yml"
+    echo "请先激活环境: conda activate $TARGET_ENV"
+    echo "（与 alphagen 共用同一环境时，可选安装 QCM 增量依赖: pip install -r requirements_qcm_addon.txt）"
     exit 1
 fi
 
