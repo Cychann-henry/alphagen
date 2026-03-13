@@ -37,23 +37,33 @@ if [ "$CONDA_DEFAULT_ENV" != "$TARGET_ENV" ]; then
 fi
 
 echo "✅ 环境已激活，准备后台运行..."
-echo "📄 实时日志将输出到: $OUTPUT_LOG"
+echo "📄 训练日志将输出到: $OUTPUT_LOG"
 echo "⚠️ 注意: 训练结果(模型, 因子池, Tensorboard)将输出到默认的 'out/' 目录。"
 
 # 3. 构造核心命令
-# 修改说明：
-# 1. 将 --seed 改为 --random_seeds 以匹配 rl.py 定义
-# 2. 增加 --pool_capacity 参数
-CMD="python -m scripts.rl \
+# 第一步：数据更新命令（前台执行，不写入训练日志）
+DATA_CMD="python data_collection/fetch_baostock_data.py"
+
+# 第二步：强化学习训练命令
+RL_CMD="python -m scripts.rl \
     --random_seeds $SEED \
     --pool_capacity $POOL_CAPACITY \
     --steps $STEPS"
 
+# 先执行数据更新，成功后再启动训练
+echo "----------------------------------------------------"
+echo "📦 开始执行数据更新..."
+if ! eval "$DATA_CMD"; then
+    echo "❌ 数据更新失败，已停止后续训练启动。"
+    exit 1
+fi
+echo "✅ 数据更新完成，准备启动训练。"
+
 # 4. 使用 nohup 后台启动
-# > $OUTPUT_LOG 2>&1  意思是把所有输出（包括报错）都写入日志文件
+# > $OUTPUT_LOG 2>&1  意思是把训练输出（包括报错）都写入日志文件
 # &                   意思是放入后台
 export CUDA_VISIBLE_DEVICES=$GPU_ID
-nohup $CMD > "$OUTPUT_LOG" 2>&1 &
+nohup bash -c "$RL_CMD" > "$OUTPUT_LOG" 2>&1 &
 
 # 获取刚才启动的进程 PID
 PID=$!
