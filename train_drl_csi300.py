@@ -7,7 +7,7 @@ from datetime import datetime
 from fqf_iqn_qrdqn.agent import QRDQNAgent, IQNAgent, FQFAgent
 from alphagen.data.expression import Feature, FeatureType, Ref, StockData
 from alphagen_qlib.calculator import QLibStockDataCalculator
-from alphagen.models.alpha_pool import AlphaPool
+from alphagen.models.linear_alpha_pool import MseAlphaPool
 from alphagen.rl.env.wrapper import AlphaEnv
 
 
@@ -37,7 +37,7 @@ def run(args):
     train_calculator = QLibStockDataCalculator(data_train, target)
     valid_calculator = QLibStockDataCalculator(data_valid, target)
     test_calculator = QLibStockDataCalculator(data_test, target)
-    train_pool = AlphaPool(capacity=args.pool,
+    train_pool = MseAlphaPool(capacity=args.pool,
                            calculator=train_calculator,
                            ic_lower_bound=None,
                            l1_alpha=5e-3)

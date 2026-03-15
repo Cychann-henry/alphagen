@@ -7,23 +7,20 @@ from datetime import datetime
 from fqf_iqn_qrdqn.agent import QRQCMAgent, IQCMAgent, FQCMAgent
 from alphagen.data.expression import Feature, FeatureType, Ref, StockData
 from alphagen_qlib.calculator import QLibStockDataCalculator
-from alphagen.models.alpha_pool import AlphaPool
+from alphagen.models.linear_alpha_pool import MseAlphaPool
 from alphagen.rl.env.wrapper import AlphaEnv
+from alphagen.qcm import AlphaPoolQcm, AlphaEnvQcm
 
 
 def run(args):
-
-    # torch.cuda.set_device(args.cuda)
     config_path = os.path.join('qcm_config', f'{args.model}.yaml')
-
     with open(config_path) as f:
         config = yaml.load(f, Loader=yaml.SafeLoader)
 
-    # Create environments.
-    device = torch.device(f'cuda')
+    device = torch.device('cuda')
     close = Feature(FeatureType.CLOSE)
     target = Ref(close, -20) / close - 1
-    instruments: float = 'csi300'
+    instruments = 'csi300'
 
     data_train = StockData(instrument=instruments,
                            start_time='2010-01-01',
@@ -34,16 +31,24 @@ def run(args):
     data_test = StockData(instrument=instruments,
                           start_time='2021-01-01',
                           end_time='2022-12-31')
-    
-    
+
     train_calculator = QLibStockDataCalculator(data_train, target)
     valid_calculator = QLibStockDataCalculator(data_valid, target)
     test_calculator = QLibStockDataCalculator(data_test, target)
-    train_pool = AlphaPool(capacity=args.pool,
-                           calculator=train_calculator,
-                           ic_lower_bound=None,
-                           l1_alpha=5e-3)
-    train_env = AlphaEnv(pool=train_pool, device=device, print_expr=True)
+
+    if args.use_qcm_stack:
+        train_pool = AlphaPoolQcm(capacity=args.pool,
+                                 calculator=train_calculator,
+                                 ic_lower_bound=None,
+                                 l1_alpha=5e-3,
+                                 device=device)
+        train_env = AlphaEnvQcm(pool=train_pool, device=device, print_expr=True)
+    else:
+        train_pool = MseAlphaPool(capacity=args.pool,
+                                 calculator=train_calculator,
+                                 ic_lower_bound=None,
+                                 l1_alpha=5e-3)
+        train_env = AlphaEnv(pool=train_pool, device=device, print_expr=True)
 
     # Specify the directory to log.
     name = args.model
@@ -93,5 +98,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--pool', type=int, default=20)
     parser.add_argument('--std-lam', type=float, default=1.0)
+    parser.add_argument('--use-qcm-stack', action='store_true',
+                        help='Use QCM-only pool/env (AlphaPoolQcm + AlphaEnvQcm with config_qcm)')
     args = parser.parse_args()
     run(args)

@@ -26,6 +26,8 @@ SEED=0
 POOL=20
 # QCM 专用（train_qcm*.py 使用，train_drl_csi300 忽略）
 STD_LAM=1.0
+# 是否使用 QCM 独立体系（AlphaPoolQcm + AlphaEnvQcm + config_qcm）；留空则用默认 MseAlphaPool + AlphaEnv
+USE_QCM_STACK=""
 
 # 日志目录（nohup 输出）
 LOG_DIR="./AlphaQCM_data"
@@ -55,16 +57,19 @@ case "$TASK" in
         ENTRY="train_qcm.py"
         LOG_SUBDIR="alpha_logs"
         EXTRA_ARGS="--model $MODEL --seed $SEED --pool $POOL --std-lam $STD_LAM"
+        [ -n "$USE_QCM_STACK" ] && EXTRA_ARGS="$EXTRA_ARGS --use-qcm-stack"
         ;;
     qcm_csi300)
         ENTRY="train_qcm_csi300.py"
         LOG_SUBDIR="csi300_logs"
         EXTRA_ARGS="--model $MODEL --seed $SEED --pool $POOL --std-lam $STD_LAM"
+        [ -n "$USE_QCM_STACK" ] && EXTRA_ARGS="$EXTRA_ARGS --use-qcm-stack"
         ;;
     qcm_csi500)
         ENTRY="train_qcm_csi500.py"
         LOG_SUBDIR="csi500_logs"
         EXTRA_ARGS="--model $MODEL --seed $SEED --pool $POOL --std-lam $STD_LAM"
+        [ -n "$USE_QCM_STACK" ] && EXTRA_ARGS="$EXTRA_ARGS --use-qcm-stack"
         ;;
     drl_csi300)
         # DRL 基线：使用 config/*.yaml，无 std_lam
