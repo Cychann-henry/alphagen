@@ -262,10 +262,20 @@ class BaseAgent(ABC):
             self.save_models(os.path.join(self.model_dir, 'final'))
             # self.online_net.train()
 
+    def _parse_ensemble_metric(self, metric):
+        """Normalize ensemble metric to (ic, rank_ic) for compatibility."""
+        if isinstance(metric, (tuple, list, np.ndarray)):
+            ic = float(metric[0])
+            rank_ic = float(metric[1]) if len(metric) > 1 else np.nan
+            return ic, rank_ic
+        return float(metric), np.nan
+
     def evaluate(self):
 
-        valid_ic = self.env.pool.test_ensemble(self.valid_calculator)
-        test_ic = self.env.pool.test_ensemble(self.test_calculator)
+        valid_metric = self.env.pool.test_ensemble(self.valid_calculator)
+        test_metric = self.env.pool.test_ensemble(self.test_calculator)
+        valid_ic, valid_rank_ic = self._parse_ensemble_metric(valid_metric)
+        test_ic, test_rank_ic = self._parse_ensemble_metric(test_metric)
 
         if valid_ic > self.best_eval_score:
             self.best_eval_score = valid_ic
@@ -279,6 +289,10 @@ class BaseAgent(ABC):
         # We log evaluation results along with training steps.
         self.writer.add_scalar('ic/valid', valid_ic, self.steps)
         self.writer.add_scalar('ic/test', test_ic, self.steps)
+        if not np.isnan(valid_rank_ic):
+            self.writer.add_scalar('rank_ic/valid', valid_rank_ic, self.steps)
+        if not np.isnan(test_rank_ic):
+            self.writer.add_scalar('rank_ic/test', test_rank_ic, self.steps)
 
     def __del__(self):
         self.env.close()

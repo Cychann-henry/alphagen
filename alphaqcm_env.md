@@ -133,5 +133,7 @@ pip install -r requirements_qcm_addon.txt
 ## 7. 与 runqcm.sh 的关系
 
 - **runqcm.sh** 默认使用与 alphagen 相同的环境（`alphagen_env`），不负责创建环境；若采用「在 alphagen 上升级」方案，只需激活 `alphagen_env` 并可选安装 `requirements_qcm_addon.txt`。
+- **职责边界**：`runqcm.sh` 与 `run.sh` 可独立运行，互不依赖。`run.sh` 用于 AlphaGen 主训练（`scripts/rl.py`），`runqcm.sh` 用于 AlphaQCM 入口（`train_qcm*.py` 与 `train_drl_csi300.py`）。
+- **同脚本分层**：`runqcm.sh` 内部将 QCM 分支与 baseline 分支分层处理：QCM 使用 `qcm_config/*.yaml`，baseline（`drl_csi300`）使用 `config/*.yaml`，避免参数和配置串用。
 - 环境配置的**权威来源**：独立环境用 `alphaqcm_env.yml`；在 alphagen 上升级时以现有 `requirements.txt` + `requirements_qcm_addon.txt` 为准。
 - 本文档记录**配置逻辑**与**跨机/升级**方式，便于在非本机或与 alphagen 共用环境时正确复现与避免冲突。
