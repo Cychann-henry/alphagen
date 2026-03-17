@@ -185,6 +185,14 @@
 - **不加**：使用 alphagen 默认（MseAlphaPool + AlphaEnv），与现有行为一致。
 - **加 `--use-qcm-stack`**：使用 AlphaPoolQcm + AlphaEnvQcm（config_qcm 的表达式长度与动作空间，无 subexprs）。
 
+运行编排约定（已对齐）：
+
+- `run.sh` 仅用于 AlphaGen 主流程（`python -m scripts.rl ...`）。
+- `runqcm.sh` 仅用于 AlphaQCM 入口编排（`train_qcm*.py` 与 `train_drl_csi300.py`）。
+- `runqcm.sh` 内部虽然保留 `drl_csi300` 分支，但该分支被标记为 baseline 角色，配置来源固定为 `config/*.yaml`，与 QCM 分支（`qcm_config/*.yaml`）逻辑隔离。
+- `--use-qcm-stack` 与 `--std-lam` 仅在 QCM 分支生效；`drl_csi300` 会显式提示忽略这些 QCM 专用变量。
+- 时间窗逻辑已统一到动态方案：`train_qcm*.py` 与 `train_drl_csi300.py` 均以“当前日期 - 7 天”作为测试截止日，再按 train/valid/test 动态划分，不再写死到 2022-12-31。
+
 示例：
 
 ```bash

@@ -1,8 +1,8 @@
 #!/bin/bash
 # =============================================================================
-# AlphaQCM 运行脚本 (QCM 层级)
-# 用途：环境检查 → 选择数据集/模型 → 运行 train_qcm / train_qcm_csi300 / train_qcm_csi500
-# 可选：运行 DRL 基线 train_drl_csi300（使用 config/ 下配置，非 qcm_config）
+# AlphaQCM 运行脚本（仅用于 AlphaQCM 体系）
+# 用途：环境检查 -> 选择 QCM/baseline 任务 -> 运行 train_qcm* 或 train_drl_csi300
+# 说明：本脚本与 run.sh 职责分离；run.sh 负责 AlphaGen（scripts/rl.py），runqcm.sh 负责 AlphaQCM 入口
 #
 # 环境适配：
 #   与 alphagen 共用同一 conda 环境（推荐）：conda activate alphagen_env，可选 pip install -r requirements_qcm_addon.txt
@@ -28,10 +28,11 @@ POOL=20
 STD_LAM=1.0
 # 是否使用 QCM 独立体系（AlphaPoolQcm + AlphaEnvQcm + config_qcm）；留空则用默认 MseAlphaPool + AlphaEnv
 USE_QCM_STACK=""
+# 干跑开关：非空时仅打印命令，不启动训练（可临时用 DRY_RUN=1 ./runqcm.sh）
+DRY_RUN="${DRY_RUN:-}"
 
 # 日志目录（nohup 输出）
 LOG_DIR="./AlphaQCM_data"
-OUTPUT_LOG="${LOG_DIR}/runqcm_${TASK}_${MODEL}_seed${SEED}_$(date +%Y%m%d-%H%M).txt"
 # ---------------------------------------------------------------------
 
 # 切换到项目根目录（脚本所在目录的上级）
@@ -51,31 +52,9 @@ export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
 # 3. 确保日志目录存在
 mkdir -p "$LOG_DIR"
 
-# 4. 根据 TASK 选择入口与参数
+# 4. 基础校验
 case "$TASK" in
-    qcm_all)
-        ENTRY="train_qcm.py"
-        LOG_SUBDIR="alpha_logs"
-        EXTRA_ARGS="--model $MODEL --seed $SEED --pool $POOL --std-lam $STD_LAM"
-        [ -n "$USE_QCM_STACK" ] && EXTRA_ARGS="$EXTRA_ARGS --use-qcm-stack"
-        ;;
-    qcm_csi300)
-        ENTRY="train_qcm_csi300.py"
-        LOG_SUBDIR="csi300_logs"
-        EXTRA_ARGS="--model $MODEL --seed $SEED --pool $POOL --std-lam $STD_LAM"
-        [ -n "$USE_QCM_STACK" ] && EXTRA_ARGS="$EXTRA_ARGS --use-qcm-stack"
-        ;;
-    qcm_csi500)
-        ENTRY="train_qcm_csi500.py"
-        LOG_SUBDIR="csi500_logs"
-        EXTRA_ARGS="--model $MODEL --seed $SEED --pool $POOL --std-lam $STD_LAM"
-        [ -n "$USE_QCM_STACK" ] && EXTRA_ARGS="$EXTRA_ARGS --use-qcm-stack"
-        ;;
-    drl_csi300)
-        # DRL 基线：使用 config/*.yaml，无 std_lam
-        ENTRY="train_drl_csi300.py"
-        LOG_SUBDIR="csi300_logs"
-        EXTRA_ARGS="--model $MODEL --seed $SEED --pool $POOL"
+    qcm_all|qcm_csi300|qcm_csi500|drl_csi300)
         ;;
     *)
         echo "未知 TASK: $TASK"
@@ -84,17 +63,92 @@ case "$TASK" in
         ;;
 esac
 
+case "$MODEL" in
+    qrdqn|iqn|fqf)
+        ;;
+    *)
+        echo "未知 MODEL: $MODEL"
+        echo "可选: qrdqn | iqn | fqf"
+        exit 1
+        ;;
+esac
+
+# 5. 根据 TASK 选择入口与参数
+case "$TASK" in
+    qcm_all)
+        ENTRY="train_qcm.py"
+        LOG_SUBDIR="alpha_logs"
+        STACK_ROLE="qcm"
+        CONFIG_SOURCE="qcm_config/${MODEL}.yaml"
+        EXTRA_ARGS="--model $MODEL --seed $SEED --pool $POOL --std-lam $STD_LAM"
+        if [ -n "$USE_QCM_STACK" ]; then
+            EXTRA_ARGS="$EXTRA_ARGS --use-qcm-stack"
+            STACK_TAG="qcmstack"
+        else
+            STACK_TAG="defaultstack"
+        fi
+        ;;
+    qcm_csi300)
+        ENTRY="train_qcm_csi300.py"
+        LOG_SUBDIR="csi300_logs"
+        STACK_ROLE="qcm"
+        CONFIG_SOURCE="qcm_config/${MODEL}.yaml"
+        EXTRA_ARGS="--model $MODEL --seed $SEED --pool $POOL --std-lam $STD_LAM"
+        if [ -n "$USE_QCM_STACK" ]; then
+            EXTRA_ARGS="$EXTRA_ARGS --use-qcm-stack"
+            STACK_TAG="qcmstack"
+        else
+            STACK_TAG="defaultstack"
+        fi
+        ;;
+    qcm_csi500)
+        ENTRY="train_qcm_csi500.py"
+        LOG_SUBDIR="csi500_logs"
+        STACK_ROLE="qcm"
+        CONFIG_SOURCE="qcm_config/${MODEL}.yaml"
+        EXTRA_ARGS="--model $MODEL --seed $SEED --pool $POOL --std-lam $STD_LAM"
+        if [ -n "$USE_QCM_STACK" ]; then
+            EXTRA_ARGS="$EXTRA_ARGS --use-qcm-stack"
+            STACK_TAG="qcmstack"
+        else
+            STACK_TAG="defaultstack"
+        fi
+        ;;
+    drl_csi300)
+        # DRL baseline：使用 config/*.yaml，忽略 QCM 专用变量
+        ENTRY="train_drl_csi300.py"
+        LOG_SUBDIR="csi300_logs"
+        STACK_ROLE="baseline"
+        STACK_TAG="baseline"
+        CONFIG_SOURCE="config/${MODEL}.yaml"
+        EXTRA_ARGS="--model $MODEL --seed $SEED --pool $POOL"
+        if [ -n "$USE_QCM_STACK" ] || [ "$STD_LAM" != "1.0" ]; then
+            echo "提示: TASK=drl_csi300 时将忽略 USE_QCM_STACK 和 STD_LAM"
+        fi
+        ;;
+esac
+
+OUTPUT_LOG="${LOG_DIR}/runqcm_${TASK}_${STACK_TAG}_${MODEL}_seed${SEED}_$(date +%Y%m%d-%H%M).txt"
+
 CMD="python $ENTRY $EXTRA_ARGS"
 echo "----------------------------------------------------"
-echo "AlphaQCM 运行脚本 (TASK=$TASK, MODEL=$MODEL)"
+echo "AlphaQCM 运行脚本 (TASK=$TASK, MODEL=$MODEL, STACK=$STACK_TAG)"
 echo "----------------------------------------------------"
 echo "环境: $CONDA_DEFAULT_ENV"
+echo "脚本职责: runqcm.sh 仅负责编排 AlphaQCM 相关入口；run.sh 负责 AlphaGen 主训练"
+echo "任务角色: $STACK_ROLE"
+echo "配置来源: $CONFIG_SOURCE"
 echo "命令: $CMD"
 echo "日志: $OUTPUT_LOG"
 echo "训练结果将写入: ${LOG_DIR}/${LOG_SUBDIR}/"
 echo "----------------------------------------------------"
 
-# 5. 后台运行（如需前台直接运行，可改为: exec $CMD）
+if [ -n "$DRY_RUN" ]; then
+    echo "DRY_RUN 已开启：仅完成命令构造与参数检查，不启动后台训练。"
+    exit 0
+fi
+
+# 6. 后台运行（如需前台直接运行，可改为: exec $CMD）
 export CUDA_VISIBLE_DEVICES=$GPU_ID
 nohup $CMD > "$OUTPUT_LOG" 2>&1 &
 PID=$!

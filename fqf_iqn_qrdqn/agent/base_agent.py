@@ -20,7 +20,8 @@ class BaseAgent(ABC):
                  epsilon_decay_steps=250000, double_q_learning=False,
                  dueling_net=False, noisy_net=False, use_per=False,
                  log_interval=100, eval_interval=250000, num_eval_steps=125000,
-                 max_episode_steps=27000, grad_cliping=5.0, cuda=True, seed=0):
+                 max_episode_steps=27000, grad_cliping=5.0, cuda=True, seed=0,
+                 heartbeat_interval_sec=600):
 
         self.env = env
         self.valid_calculator = valid_calculator
@@ -86,6 +87,24 @@ class BaseAgent(ABC):
         self.target_update_interval = target_update_interval
         self.max_episode_steps = max_episode_steps
         self.grad_cliping = grad_cliping
+        self.heartbeat_interval_sec = heartbeat_interval_sec
+        self._last_heartbeat_ts = time.time()
+
+    def _maybe_report_heartbeat(self):
+        now = time.time()
+        if now - self._last_heartbeat_ts < self.heartbeat_interval_sec:
+            return
+        self._last_heartbeat_ts = now
+
+        pool_state = self.env.pool.state
+        pool_size = len(pool_state.get('exprs', []))
+        best_ic = pool_state.get('best_ic_ret', np.nan)
+        eps = self.epsilon_train.get()
+        print(
+            f"[HEARTBEAT] steps={self.steps} episodes={self.episodes} "
+            f"pool_size={pool_size} best_ic={best_ic:.6f} epsilon={eps:.6f}",
+            flush=True
+        )
 
     def run(self):
         while True:
@@ -250,6 +269,7 @@ class BaseAgent(ABC):
 
     def train_step_interval(self):
         self.epsilon_train.step()
+        self._maybe_report_heartbeat()
 
         if self.steps % self.target_update_interval == 0:
             self.update_target()
@@ -262,10 +282,20 @@ class BaseAgent(ABC):
             self.save_models(os.path.join(self.model_dir, 'final'))
             # self.online_net.train()
 
+    def _parse_ensemble_metric(self, metric):
+        """Normalize ensemble metric to (ic, rank_ic) for compatibility."""
+        if isinstance(metric, (tuple, list, np.ndarray)):
+            ic = float(metric[0])
+            rank_ic = float(metric[1]) if len(metric) > 1 else np.nan
+            return ic, rank_ic
+        return float(metric), np.nan
+
     def evaluate(self):
 
-        valid_ic = self.env.pool.test_ensemble(self.valid_calculator)
-        test_ic = self.env.pool.test_ensemble(self.test_calculator)
+        valid_metric = self.env.pool.test_ensemble(self.valid_calculator)
+        test_metric = self.env.pool.test_ensemble(self.test_calculator)
+        valid_ic, valid_rank_ic = self._parse_ensemble_metric(valid_metric)
+        test_ic, test_rank_ic = self._parse_ensemble_metric(test_metric)
 
         if valid_ic > self.best_eval_score:
             self.best_eval_score = valid_ic
@@ -279,6 +309,10 @@ class BaseAgent(ABC):
         # We log evaluation results along with training steps.
         self.writer.add_scalar('ic/valid', valid_ic, self.steps)
         self.writer.add_scalar('ic/test', test_ic, self.steps)
+        if not np.isnan(valid_rank_ic):
+            self.writer.add_scalar('rank_ic/valid', valid_rank_ic, self.steps)
+        if not np.isnan(test_rank_ic):
+            self.writer.add_scalar('rank_ic/test', test_rank_ic, self.steps)
 
     def __del__(self):
         self.env.close()
